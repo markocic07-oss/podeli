@@ -49,8 +49,6 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
   const [title, setTitle] = useState('');
   const [amountInput, setAmountInput] = useState('');
   const [paidBy, setPaidBy] = useState('');
-  const [payerMode, setPayerMode] = useState<'single' | 'multiple'>('single');
-  const [payerInputs, setPayerInputs] = useState<Record<string, string>>({});
   const [participantIds, setParticipantIds] = useState<string[]>([]);
   const [splitMethod, setSplitMethod] = useState<SplitMethod>('equal');
   const [customInputs, setCustomInputs] = useState<Record<string, string>>({});
@@ -79,8 +77,6 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
       setTitle(editingExpense.title);
       setAmountInput(minorToEditableString(editingExpense.amount_minor));
       setPaidBy(editingExpense.paid_by);
-      setPayerMode('single');
-      setPayerInputs({});
       const pIds = editingExpense.shares.map((s) => s.user_id);
       setParticipantIds(pIds);
       setSplitMethod(editingExpense.split_method);
@@ -113,8 +109,6 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
       setTitle('');
       setAmountInput('');
       setPaidBy(user?.id ?? initialGroup?.members[0]?.user_id ?? '');
-      setPayerMode('single');
-      setPayerInputs({});
       const allIds = initialGroup?.members.map((m) => m.user_id) ?? [];
       setParticipantIds(allIds);
       setSplitMethod('equal');
@@ -137,8 +131,6 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
     const memberIds = grp.members.map((m) => m.user_id);
     setParticipantIds(memberIds);
     setPaidBy(memberIds.includes(user?.id ?? '') ? user!.id : memberIds[0] ?? '');
-    setPayerMode('single');
-    setPayerInputs({});
     setCustomInputs({});
     setPercentInputs({});
   };
@@ -155,55 +147,72 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
   const parsedAmountMinor = useMemo(() => parseMajorToMinor(amountInput), [amountInput]);
   const currency = selectedGroupDetails?.group.currency ?? 'RSD';
 
-  // Multi-payer contributions validation
-  const multiPayerSummary = useMemo(() => {
-    const members = selectedGroupDetails?.members ?? [];
-    if (payerMode !== 'multiple' || !parsedAmountMinor || parsedAmountMinor <= 0) {
-      return { valid: true, contributions: [] as PayerContribution[], diffMinor: 0 };
-    }
-    const contributions: PayerContribution[] = [];
-    let sum = 0;
-    for (const m of members) {
-      const raw = (payerInputs[m.user_id] ?? '').trim();
-      const val = raw === '' ? 0 : parseMajorToMinor(raw);
-      if (val === null || val < 0) {
-        return { valid: false, contributions: [], diffMinor: parsedAmountMinor };
-      }
-      if (val > 0) {
-        contributions.push({ userId: m.user_id, paidMinor: val });
-        sum += val;
-      }
-    }
-    const diffMinor = parsedAmountMinor - sum;
-    return {
-      valid: contributions.length > 0 && diffMinor === 0,
-      contributions,
-      diffMinor,
-    };
-  }, [payerMode, parsedAmountMinor, payerInputs, selectedGroupDetails?.members]);
+  // In "Po iznosu" (custom) on a new expense, user enters how much each participant PAID (gave),
+  // and the total cost is split equally among all selected participants.
+  const isCustomContributionsMode = !editingExpense && splitMethod === 'custom';
 
   // Compute live split preview
   const splitPreview = useMemo(() => {
     if (!parsedAmountMinor || parsedAmountMinor <= 0 || participantIds.length === 0) {
-      return { valid: false, shares: [] as ShareAllocation[], diffMinor: 0, totalBps: 0 };
+      return {
+        valid: false,
+        shares: [] as ShareAllocation[],
+        contributions: [] as PayerContribution[],
+        diffMinor: 0,
+        totalBps: 0,
+      };
     }
 
     if (splitMethod === 'equal') {
       const shares = calculateEqualSplit(parsedAmountMinor, participantIds);
-      return { valid: true, shares, diffMinor: 0, totalBps: 10000 };
+      return {
+        valid: true,
+        shares,
+        contributions: paidBy ? [{ userId: paidBy, paidMinor: parsedAmountMinor }] : [],
+        diffMinor: 0,
+        totalBps: 10000,
+      };
     }
 
     if (splitMethod === 'custom') {
-      const shares: ShareAllocation[] = [];
+      const entered: ShareAllocation[] = [];
       for (const uid of participantIds) {
-        const val = parseMajorToMinor(customInputs[uid] ?? '0');
-        if (val === null) {
-          return { valid: false, shares: [], diffMinor: parsedAmountMinor, totalBps: 0 };
+        const raw = (customInputs[uid] ?? '').trim();
+        const val = raw === '' ? 0 : parseMajorToMinor(raw);
+        if (val === null || val < 0) {
+          return {
+            valid: false,
+            shares: [],
+            contributions: [],
+            diffMinor: parsedAmountMinor,
+            totalBps: 0,
+          };
         }
-        shares.push({ userId: uid, shareAmountMinor: val });
+        entered.push({ userId: uid, shareAmountMinor: val });
       }
-      const check = validateCustomSplit(parsedAmountMinor, shares);
-      return { valid: check.valid, shares, diffMinor: check.diffMinor, totalBps: 0 };
+      const check = validateCustomSplit(parsedAmountMinor, entered);
+
+      if (isCustomContributionsMode) {
+        const contributions: PayerContribution[] = entered
+          .filter((e) => e.shareAmountMinor > 0)
+          .map((e) => ({ userId: e.userId, paidMinor: e.shareAmountMinor }));
+        const equalShares = calculateEqualSplit(parsedAmountMinor, participantIds);
+        return {
+          valid: check.valid && contributions.length > 0,
+          shares: equalShares,
+          contributions,
+          diffMinor: check.diffMinor,
+          totalBps: 0,
+        };
+      }
+
+      return {
+        valid: check.valid,
+        shares: entered,
+        contributions: paidBy ? [{ userId: paidBy, paidMinor: parsedAmountMinor }] : [],
+        diffMinor: check.diffMinor,
+        totalBps: 0,
+      };
     }
 
     // Percentage
@@ -212,22 +221,35 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
       basisPoints: parsePercentToBasisPoints(percentInputs[uid] ?? '0') ?? -1,
     }));
     if (inputs.some((i) => i.basisPoints < 0)) {
-      return { valid: false, shares: [], diffMinor: 0, totalBps: 0 };
+      return { valid: false, shares: [], contributions: [], diffMinor: 0, totalBps: 0 };
     }
     const res = calculatePercentageSplit(parsedAmountMinor, inputs);
-    return { valid: res.valid, shares: res.shares, diffMinor: 0, totalBps: res.totalBasisPoints };
-  }, [parsedAmountMinor, participantIds, splitMethod, customInputs, percentInputs]);
+    return {
+      valid: res.valid,
+      shares: res.shares,
+      contributions: paidBy ? [{ userId: paidBy, paidMinor: parsedAmountMinor }] : [],
+      diffMinor: 0,
+      totalBps: res.totalBasisPoints,
+    };
+  }, [
+    parsedAmountMinor,
+    participantIds,
+    splitMethod,
+    customInputs,
+    percentInputs,
+    paidBy,
+    isCustomContributionsMode,
+  ]);
 
-  // Helper to pre-fill equal values when switching to custom/percentage tabs
+  // Helper when switching to custom/percentage tabs
   const handleSelectSplitMethod = (method: SplitMethod) => {
     setSplitMethod(method);
-    if (method === 'custom' && parsedAmountMinor && participantIds.length > 0) {
-      const equal = calculateEqualSplit(parsedAmountMinor, participantIds);
-      const next: Record<string, string> = {};
-      for (const s of equal) {
-        next[s.userId] = minorToEditableString(s.shareAmountMinor);
-      }
-      setCustomInputs(next);
+    if (method === 'custom') {
+      // Leave inputs empty so the user can directly type how much each person gave
+      setCustomInputs((prev) => {
+        const hasValues = Object.values(prev).some((v) => v.trim() !== '');
+        return hasValues ? prev : {};
+      });
     } else if (method === 'percentage' && participantIds.length > 0) {
       const base = Math.floor(10000 / participantIds.length);
       const rem = 10000 - base * participantIds.length;
@@ -276,12 +298,8 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
       setError(t('expenses.validation.groupRequired'));
       return;
     }
-    if (payerMode === 'single' && !paidBy) {
+    if (!isCustomContributionsMode && !paidBy) {
       setError(t('expenses.validation.payerRequired'));
-      return;
-    }
-    if (payerMode === 'multiple' && !multiPayerSummary.valid) {
-      setError('Zbir iznosa koje su osobe platile mora tačno da se poklopi sa ukupnim iznosom troška.');
       return;
     }
     if (participantIds.length === 0) {
@@ -299,12 +317,12 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
 
     setSubmitting(true);
     try {
-      if (!editingExpense && payerMode === 'multiple' && multiPayerSummary.contributions.length > 1) {
+      if (isCustomContributionsMode && splitPreview.contributions.length > 1) {
         const expanded = expandMultiPayerExpenses(
-          multiPayerSummary.contributions,
+          splitPreview.contributions,
           splitPreview.shares
         );
-        const breakdownNote = multiPayerSummary.contributions
+        const breakdownNote = splitPreview.contributions
           .map((c) => {
             const mem = selectedGroupDetails.members.find((m) => m.user_id === c.userId);
             const name = mem?.profile.first_name ?? t('common.member');
@@ -341,8 +359,8 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
       }
 
       const effectivePaidBy =
-        payerMode === 'multiple' && multiPayerSummary.contributions.length === 1
-          ? multiPayerSummary.contributions[0].userId
+        isCustomContributionsMode && splitPreview.contributions.length === 1
+          ? splitPreview.contributions[0].userId
           : paidBy;
 
       const payload = {
@@ -353,7 +371,7 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
         currency: selectedGroupDetails.group.currency,
         paid_by: effectivePaidBy,
         category,
-        split_method: splitMethod,
+        split_method: isCustomContributionsMode ? ('equal' as SplitMethod) : splitMethod,
         expense_date: expenseDate,
         receipt_url: receiptUrl,
         shares: splitPreview.shares,
@@ -377,7 +395,7 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
   if (!open) return null;
 
   const payerExcluded = Boolean(
-    payerMode === 'single' && paidBy && !participantIds.includes(paidBy)
+    !isCustomContributionsMode && paidBy && !participantIds.includes(paidBy)
   );
 
   return (
@@ -483,48 +501,14 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
               </div>
 
               <div>
-                <div className="flex items-center justify-between gap-2 mb-1.5">
-                  <label className="block text-sm font-semibold text-[#171C19]">
-                    {t('expenses.form.paidBy')}
-                  </label>
-                  {!editingExpense && (selectedGroupDetails?.members.length ?? 0) >= 2 && (
-                    <div className="inline-flex rounded-xl bg-[#F5F7F6] p-0.5 border border-[#E8ECE9] text-[11px] font-semibold">
-                      <button
-                        type="button"
-                        onClick={() => setPayerMode('single')}
-                        className={`px-2.5 py-1 rounded-lg transition-all ${
-                          payerMode === 'single'
-                            ? 'bg-[#35483F] text-white shadow-2xs'
-                            : 'text-[#606A64] hover:text-[#171C19]'
-                        }`}
-                      >
-                        1 osoba
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPayerMode('multiple');
-                          if (Object.keys(payerInputs).length === 0 && parsedAmountMinor && selectedGroupDetails) {
-                            const init: Record<string, string> = {};
-                            for (const m of selectedGroupDetails.members) {
-                              init[m.user_id] = m.user_id === paidBy ? minorToEditableString(parsedAmountMinor) : '';
-                            }
-                            setPayerInputs(init);
-                          }
-                        }}
-                        className={`px-2.5 py-1 rounded-lg transition-all ${
-                          payerMode === 'multiple'
-                            ? 'bg-[#35483F] text-white shadow-2xs'
-                            : 'text-[#606A64] hover:text-[#171C19]'
-                        }`}
-                      >
-                        Više osoba
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {payerMode === 'single' ? (
+                <label className="block text-sm font-semibold text-[#171C19] mb-1.5">
+                  {t('expenses.form.paidBy')}
+                </label>
+                {isCustomContributionsMode ? (
+                  <div className="min-h-[46px] px-4 py-2.5 rounded-2xl border border-[#35483F]/20 bg-[#E8F1EB]/70 text-xs font-semibold text-[#35483F] flex items-center">
+                    Unesi dole kod učesnika ko je koliko dao novca
+                  </div>
+                ) : (
                   <select
                     value={paidBy}
                     onChange={(e) => setPaidBy(e.target.value)}
@@ -538,81 +522,9 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
                       </option>
                     ))}
                   </select>
-                ) : (
-                  <p className="text-xs text-[#606A64] py-2.5 px-3 rounded-2xl bg-[#E8F1EB]/60 border border-[#35483F]/15">
-                    Unesi ispod koliko je svako <strong>dao novca</strong> za ovaj račun.
-                  </p>
                 )}
               </div>
             </div>
-
-            {/* Multi-Payer Inputs Card (Splitwise "Multiple people paid") */}
-            {payerMode === 'multiple' && selectedGroupDetails && (
-              <div className="p-4 rounded-2xl bg-[#F5F7F6] border border-[#E8ECE9] space-y-2.5">
-                <p className="text-xs font-bold text-[#35483F]">
-                  Ko je koliko platio (dao novca)?
-                </p>
-                <div className="space-y-2">
-                  {selectedGroupDetails.members.map((m) => {
-                    const fullName = `${m.profile.first_name} ${m.profile.last_name}`.trim();
-                    return (
-                      <div
-                        key={m.user_id}
-                        className="flex items-center justify-between gap-2.5 bg-white px-3 py-2 rounded-xl border border-[#E8ECE9]"
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <MemberAvatar profile={m.profile} size="xs" />
-                          <span className="text-xs sm:text-sm font-medium text-[#171C19] truncate">
-                            {fullName}
-                            {m.user_id === user?.id && (
-                              <span className="text-xs text-[#818A84] ml-1">({t('common.you')})</span>
-                            )}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            value={payerInputs[m.user_id] ?? ''}
-                            onChange={(e) =>
-                              setPayerInputs((prev) => ({
-                                ...prev,
-                                [m.user_id]: e.target.value,
-                              }))
-                            }
-                            placeholder="0"
-                            className="w-28 px-3 py-1.5 rounded-xl border border-[#E8ECE9] text-right text-sm font-semibold tabular-nums focus:outline-none focus:border-[#35483F]"
-                          />
-                          <span className="text-xs text-[#818A84] w-8">{currency}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                {parsedAmountMinor && parsedAmountMinor > 0 && (
-                  <div
-                    className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between ${
-                      multiPayerSummary.valid
-                        ? 'bg-[#E6F4EE] text-[#16835B]'
-                        : 'bg-[#FDF4E6] text-[#B87314]'
-                    }`}
-                  >
-                    <span>
-                      {multiPayerSummary.valid
-                        ? t('expenses.form.exactMatch')
-                        : multiPayerSummary.diffMinor > 0
-                        ? 'Preostalo za unos uplata'
-                        : 'Prekoračen ukupan iznos za'}
-                    </span>
-                    {!multiPayerSummary.valid && (
-                      <span className="tabular-nums">
-                        {formatCurrency(Math.abs(multiPayerSummary.diffMinor), currency, lang)}
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
 
             {/* Split Method Tabs + Friendly 1-Line Explanation */}
             <div>
@@ -645,7 +557,7 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
                 {splitMethod === 'equal'
                   ? t('guide.hints.splitEqual')
                   : splitMethod === 'custom'
-                  ? 'Unesi koliko je svako POTROŠIO (čiji je koliki deo računa). Ako je više osoba dalo novac za račun, izaberi gore „Više osoba“ kod Ko je platio.'
+                  ? 'Unesi dole koliko je svako DAO novca — aplikacija automatski deli trošak jednako i računa ko kome duguje.'
                   : t('guide.hints.splitPercentage')}
               </p>
             </div>
@@ -933,27 +845,8 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
                   {t('expenses.form.livePreviewTitle')}
                 </p>
                 {(() => {
-                  const effectivePayers: PayerContribution[] =
-                    payerMode === 'multiple'
-                      ? multiPayerSummary.contributions
-                      : paidBy && parsedAmountMinor
-                      ? [{ userId: paidBy, paidMinor: parsedAmountMinor }]
-                      : [];
-
-                  if (payerMode === 'multiple' && !multiPayerSummary.valid) {
-                    return (
-                      <p className="text-xs text-[#B87314] font-medium">
-                        Unesi tačne uplate gore tako da zbir bude{' '}
-                        {formatCurrency(parsedAmountMinor ?? 0, currency, lang, {
-                          compactZeroDecimals: true,
-                        })}
-                        .
-                      </p>
-                    );
-                  }
-
                   const transfers = computeMultiPayerTransfers(
-                    effectivePayers,
+                    splitPreview.contributions,
                     splitPreview.shares
                   );
 
