@@ -1,0 +1,19 @@
+{
+  "name": "PODELI – Zajednički troškovi",
+  "short_name": "PODELI",
+  "description": "Zajednički troškovi, bez komplikacija. Podeli troškove sa prijateljima, porodicom i cimerima.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F5F7F6",
+  "theme_color": "#35483F",
+  "orientation": "portrait-primary",
+  "lang": "sr",
+  "icons": [
+    {
+      "src": "/icons/podeli-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
