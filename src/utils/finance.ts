@@ -501,3 +501,148 @@ export function calculateDashboardBalances(
 
   return result;
 }
+
+export interface PayerContribution {
+  userId: string;
+  paidMinor: number;
+}
+
+export interface ExpandedPayerExpense {
+  paidBy: string;
+  amountMinor: number;
+  shares: ShareAllocation[];
+}
+
+/**
+ * Computes exact Splitwise-style minimal transfers for a single expense paid by 1 or more people.
+ * net[u] = paid[u] - share[u]
+ */
+export function computeMultiPayerTransfers(
+  payers: PayerContribution[],
+  shares: ShareAllocation[]
+): SuggestedTransfer[] {
+  const netMap = new Map<string, number>();
+
+  for (const p of payers) {
+    if (p.paidMinor > 0) {
+      netMap.set(p.userId, (netMap.get(p.userId) ?? 0) + p.paidMinor);
+    }
+  }
+  for (const s of shares) {
+    if (s.shareAmountMinor > 0) {
+      netMap.set(s.userId, (netMap.get(s.userId) ?? 0) - s.shareAmountMinor);
+    }
+  }
+
+  const syntheticBalances: MemberBalance[] = Array.from(netMap.entries()).map(
+    ([userId, netBalanceMinor]) => ({
+      userId,
+      totalPaidMinor: 0,
+      totalOwedMinor: 0,
+      confirmedSentMinor: 0,
+      confirmedReceivedMinor: 0,
+      netBalanceMinor,
+    })
+  );
+
+  return optimizeSettlements(syntheticBalances);
+}
+
+/**
+ * Expands a multi-payer expense into 1 standard expense per payer with paidMinor > 0,
+ * preserving BOTH exact payer totals (row sums) AND exact participant shares (column sums)
+ * to the last integer minor unit (0.01 RSD).
+ */
+export function expandMultiPayerExpenses(
+  payers: PayerContribution[],
+  shares: ShareAllocation[]
+): ExpandedPayerExpense[] {
+  const activePayers = payers.filter((p) => p.paidMinor > 0);
+  const activeShares = shares.filter((s) => s.shareAmountMinor > 0);
+  if (activePayers.length === 0 || activeShares.length === 0) return [];
+
+  if (activePayers.length === 1) {
+    return [
+      {
+        paidBy: activePayers[0].userId,
+        amountMinor: activePayers[0].paidMinor,
+        shares: activeShares,
+      },
+    ];
+  }
+
+  const remainingCol = activeShares.map((s) => s.shareAmountMinor);
+  let remainingTotal = remainingCol.reduce((a, b) => a + b, 0);
+
+  const result: ExpandedPayerExpense[] = [];
+
+  for (let i = 0; i < activePayers.length; i++) {
+    const payer = activePayers[i];
+    const isLast = i === activePayers.length - 1;
+
+    if (isLast) {
+      const rowShares: ShareAllocation[] = [];
+      for (let j = 0; j < activeShares.length; j++) {
+        if (remainingCol[j] > 0) {
+          rowShares.push({
+            userId: activeShares[j].userId,
+            shareAmountMinor: remainingCol[j],
+          });
+        }
+      }
+      result.push({
+        paidBy: payer.userId,
+        amountMinor: payer.paidMinor,
+        shares: rowShares,
+      });
+      continue;
+    }
+
+    const rowTarget = payer.paidMinor;
+    const rowTargetBig = BigInt(rowTarget);
+    const remTotalBig = BigInt(Math.max(1, remainingTotal));
+
+    const provisional = activeShares.map((s, j) => {
+      const colRem = remainingCol[j];
+      if (colRem <= 0) {
+        return { j, userId: s.userId, floorVal: 0, remainder: 0 };
+      }
+      const num = rowTargetBig * BigInt(colRem);
+      const floorVal = Math.min(colRem, Number(num / remTotalBig));
+      const remainder = Number(num % remTotalBig);
+      return { j, userId: s.userId, floorVal, remainder };
+    });
+
+    let allocated = provisional.reduce((acc, p) => acc + p.floorVal, 0);
+    let leftover = rowTarget - allocated;
+
+    const byRem = [...provisional].sort((a, b) =>
+      b.remainder !== a.remainder ? b.remainder - a.remainder : a.j - b.j
+    );
+
+    for (const entry of byRem) {
+      if (leftover <= 0) break;
+      if (entry.floorVal < remainingCol[entry.j]) {
+        entry.floorVal += 1;
+        leftover -= 1;
+      }
+    }
+
+    const rowShares: ShareAllocation[] = [];
+    for (const p of provisional) {
+      remainingCol[p.j] -= p.floorVal;
+      if (p.floorVal > 0) {
+        rowShares.push({ userId: p.userId, shareAmountMinor: p.floorVal });
+      }
+    }
+    remainingTotal -= rowTarget;
+
+    result.push({
+      paidBy: payer.userId,
+      amountMinor: rowTarget,
+      shares: rowShares,
+    });
+  }
+
+  return result;
+}

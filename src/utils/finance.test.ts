@@ -4,6 +4,8 @@ import {
   calculateEqualSplit,
   calculateGroupBalances,
   calculatePercentageSplit,
+  computeMultiPayerTransfers,
+  expandMultiPayerExpenses,
   formatCurrency,
   optimizeSettlements,
   parseMajorToMinor,
@@ -345,6 +347,51 @@ describe('PODELI Financial Engine', () => {
       expect(dashboard.EUR.owedToYouMinor).toBe(0);
       expect(dashboard.EUR.youOweMinor).toBe(5000);
       expect(dashboard.BAM.owedToYouMinor).toBe(10000);
+    });
+  });
+
+  describe('Multi-payer Splitwise contributions (e.g. 10.000 RSD: Ja 5.000, Jovana 2.000, Anja 3.000)', () => {
+    it('computes exact debts where whoever paid LESS owes MORE', () => {
+      const total = 1000000; // 10.000,00 RSD
+      const payers = [
+        { userId: 'ja', paidMinor: 500000 }, // 5.000
+        { userId: 'jovana', paidMinor: 200000 }, // 2.000
+        { userId: 'anja', paidMinor: 300000 }, // 3.000
+      ];
+      const shares = calculateEqualSplit(total, ['ja', 'jovana', 'anja']);
+      // shares: ja 333334, jovana 333333, anja 333333
+
+      const transfers = computeMultiPayerTransfers(payers, shares);
+      expect(transfers).toEqual([
+        { fromUserId: 'jovana', toUserId: 'ja', amountMinor: 133333 }, // Jovana owes 1.333,33
+        { fromUserId: 'anja', toUserId: 'ja', amountMinor: 33333 }, // Anja owes 333,33
+      ]);
+
+      // Expanding to persisted group expenses must yield identical group balances
+      const expanded = expandMultiPayerExpenses(payers, shares);
+      expect(expanded).toHaveLength(3);
+      expect(expanded.reduce((a, e) => a + e.amountMinor, 0)).toBe(total);
+
+      const expenses = expanded.map((exp, idx) =>
+        makeExpense({
+          id: `mp-${idx}`,
+          amount_minor: exp.amountMinor,
+          paid_by: exp.paidBy,
+          shares: exp.shares.map((s, j) => ({
+            id: `mp-${idx}-${j}`,
+            expense_id: `mp-${idx}`,
+            user_id: s.userId,
+            share_amount_minor: s.shareAmountMinor,
+          })),
+        })
+      );
+
+      const summary = calculateGroupBalances(['ja', 'jovana', 'anja'], expenses, []);
+      expect(summary.totalExpensesMinor).toBe(total);
+      expect(summary.balancesByUser.ja.netBalanceMinor).toBe(166666); // +1.666,66
+      expect(summary.balancesByUser.jovana.netBalanceMinor).toBe(-133333); // -1.333,33
+      expect(summary.balancesByUser.anja.netBalanceMinor).toBe(-33333); // -333,33
+      expect(summary.suggestedTransfers).toEqual(transfers);
     });
   });
 });

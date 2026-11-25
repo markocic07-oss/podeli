@@ -15,11 +15,14 @@ import { EXPENSE_CATEGORIES } from '../utils/categories';
 import {
   calculateEqualSplit,
   calculatePercentageSplit,
+  computeMultiPayerTransfers,
+  expandMultiPayerExpenses,
   formatCurrency,
   minorToEditableString,
   parseMajorToMinor,
   parsePercentToBasisPoints,
   validateCustomSplit,
+  type PayerContribution,
 } from '../utils/finance';
 import { MemberAvatar } from './MemberAvatar';
 
@@ -46,6 +49,8 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
   const [title, setTitle] = useState('');
   const [amountInput, setAmountInput] = useState('');
   const [paidBy, setPaidBy] = useState('');
+  const [payerMode, setPayerMode] = useState<'single' | 'multiple'>('single');
+  const [payerInputs, setPayerInputs] = useState<Record<string, string>>({});
   const [participantIds, setParticipantIds] = useState<string[]>([]);
   const [splitMethod, setSplitMethod] = useState<SplitMethod>('equal');
   const [customInputs, setCustomInputs] = useState<Record<string, string>>({});
@@ -74,6 +79,8 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
       setTitle(editingExpense.title);
       setAmountInput(minorToEditableString(editingExpense.amount_minor));
       setPaidBy(editingExpense.paid_by);
+      setPayerMode('single');
+      setPayerInputs({});
       const pIds = editingExpense.shares.map((s) => s.user_id);
       setParticipantIds(pIds);
       setSplitMethod(editingExpense.split_method);
@@ -106,6 +113,8 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
       setTitle('');
       setAmountInput('');
       setPaidBy(user?.id ?? initialGroup?.members[0]?.user_id ?? '');
+      setPayerMode('single');
+      setPayerInputs({});
       const allIds = initialGroup?.members.map((m) => m.user_id) ?? [];
       setParticipantIds(allIds);
       setSplitMethod('equal');
@@ -128,6 +137,8 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
     const memberIds = grp.members.map((m) => m.user_id);
     setParticipantIds(memberIds);
     setPaidBy(memberIds.includes(user?.id ?? '') ? user!.id : memberIds[0] ?? '');
+    setPayerMode('single');
+    setPayerInputs({});
     setCustomInputs({});
     setPercentInputs({});
   };
@@ -143,6 +154,33 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
 
   const parsedAmountMinor = useMemo(() => parseMajorToMinor(amountInput), [amountInput]);
   const currency = selectedGroupDetails?.group.currency ?? 'RSD';
+
+  // Multi-payer contributions validation
+  const multiPayerSummary = useMemo(() => {
+    const members = selectedGroupDetails?.members ?? [];
+    if (payerMode !== 'multiple' || !parsedAmountMinor || parsedAmountMinor <= 0) {
+      return { valid: true, contributions: [] as PayerContribution[], diffMinor: 0 };
+    }
+    const contributions: PayerContribution[] = [];
+    let sum = 0;
+    for (const m of members) {
+      const raw = (payerInputs[m.user_id] ?? '').trim();
+      const val = raw === '' ? 0 : parseMajorToMinor(raw);
+      if (val === null || val < 0) {
+        return { valid: false, contributions: [], diffMinor: parsedAmountMinor };
+      }
+      if (val > 0) {
+        contributions.push({ userId: m.user_id, paidMinor: val });
+        sum += val;
+      }
+    }
+    const diffMinor = parsedAmountMinor - sum;
+    return {
+      valid: contributions.length > 0 && diffMinor === 0,
+      contributions,
+      diffMinor,
+    };
+  }, [payerMode, parsedAmountMinor, payerInputs, selectedGroupDetails?.members]);
 
   // Compute live split preview
   const splitPreview = useMemo(() => {
@@ -238,8 +276,12 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
       setError(t('expenses.validation.groupRequired'));
       return;
     }
-    if (!paidBy) {
+    if (payerMode === 'single' && !paidBy) {
       setError(t('expenses.validation.payerRequired'));
+      return;
+    }
+    if (payerMode === 'multiple' && !multiPayerSummary.valid) {
+      setError('Zbir iznosa koje su osobe platile mora tačno da se poklopi sa ukupnim iznosom troška.');
       return;
     }
     if (participantIds.length === 0) {
@@ -257,13 +299,59 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
 
     setSubmitting(true);
     try {
+      if (!editingExpense && payerMode === 'multiple' && multiPayerSummary.contributions.length > 1) {
+        const expanded = expandMultiPayerExpenses(
+          multiPayerSummary.contributions,
+          splitPreview.shares
+        );
+        const breakdownNote = multiPayerSummary.contributions
+          .map((c) => {
+            const mem = selectedGroupDetails.members.find((m) => m.user_id === c.userId);
+            const name = mem?.profile.first_name ?? t('common.member');
+            return `${name}: ${formatCurrency(c.paidMinor, currency, lang, { compactZeroDecimals: true })}`;
+          })
+          .join(', ');
+        const combinedDesc = [
+          description.trim(),
+          `Zajedničko plaćanje (ukupno ${formatCurrency(parsedAmountMinor, currency, lang, { compactZeroDecimals: true })} — ${breakdownNote})`,
+        ]
+          .filter(Boolean)
+          .join('\n');
+
+        for (const item of expanded) {
+          const payerMem = selectedGroupDetails.members.find((m) => m.user_id === item.paidBy);
+          const payerName = payerMem?.profile.first_name ?? t('common.member');
+          await createExpense({
+            group_id: selectedGroupDetails.group.id,
+            title: `${title.trim()} (${payerName})`,
+            description: combinedDesc,
+            amount_minor: item.amountMinor,
+            currency: selectedGroupDetails.group.currency,
+            paid_by: item.paidBy,
+            category,
+            split_method: 'custom',
+            expense_date: expenseDate,
+            receipt_url: receiptUrl,
+            shares: item.shares,
+          });
+        }
+        showToast(t('expenses.createdSuccess'), 'success');
+        onClose();
+        return;
+      }
+
+      const effectivePaidBy =
+        payerMode === 'multiple' && multiPayerSummary.contributions.length === 1
+          ? multiPayerSummary.contributions[0].userId
+          : paidBy;
+
       const payload = {
         group_id: selectedGroupDetails.group.id,
         title: title.trim(),
         description: description.trim() || null,
         amount_minor: parsedAmountMinor,
         currency: selectedGroupDetails.group.currency,
-        paid_by: paidBy,
+        paid_by: effectivePaidBy,
         category,
         split_method: splitMethod,
         expense_date: expenseDate,
@@ -288,7 +376,9 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
 
   if (!open) return null;
 
-  const payerExcluded = Boolean(paidBy && !participantIds.includes(paidBy));
+  const payerExcluded = Boolean(
+    payerMode === 'single' && paidBy && !participantIds.includes(paidBy)
+  );
 
   return (
     <div
@@ -393,24 +483,136 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-[#171C19] mb-1.5">
-                  {t('expenses.form.paidBy')}
-                </label>
-                <select
-                  value={paidBy}
-                  onChange={(e) => setPaidBy(e.target.value)}
-                  className="w-full min-h-[46px] px-4 py-3 rounded-2xl border border-[#E8ECE9] bg-[#F5F7F6]/60 text-base sm:text-sm font-medium text-[#171C19] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#35483F]/20 focus:border-[#35483F]"
-                >
-                  {selectedGroupDetails?.members.map((m) => (
-                    <option key={m.user_id} value={m.user_id}>
-                      {m.user_id === user?.id
-                        ? `${m.profile.first_name} ${m.profile.last_name} (${t('common.you')})`
-                        : `${m.profile.first_name} ${m.profile.last_name}`}
-                    </option>
-                  ))}
-                </select>
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <label className="block text-sm font-semibold text-[#171C19]">
+                    {t('expenses.form.paidBy')}
+                  </label>
+                  {!editingExpense && (selectedGroupDetails?.members.length ?? 0) >= 2 && (
+                    <div className="inline-flex rounded-xl bg-[#F5F7F6] p-0.5 border border-[#E8ECE9] text-[11px] font-semibold">
+                      <button
+                        type="button"
+                        onClick={() => setPayerMode('single')}
+                        className={`px-2.5 py-1 rounded-lg transition-all ${
+                          payerMode === 'single'
+                            ? 'bg-[#35483F] text-white shadow-2xs'
+                            : 'text-[#606A64] hover:text-[#171C19]'
+                        }`}
+                      >
+                        1 osoba
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPayerMode('multiple');
+                          if (Object.keys(payerInputs).length === 0 && parsedAmountMinor && selectedGroupDetails) {
+                            const init: Record<string, string> = {};
+                            for (const m of selectedGroupDetails.members) {
+                              init[m.user_id] = m.user_id === paidBy ? minorToEditableString(parsedAmountMinor) : '';
+                            }
+                            setPayerInputs(init);
+                          }
+                        }}
+                        className={`px-2.5 py-1 rounded-lg transition-all ${
+                          payerMode === 'multiple'
+                            ? 'bg-[#35483F] text-white shadow-2xs'
+                            : 'text-[#606A64] hover:text-[#171C19]'
+                        }`}
+                      >
+                        Više osoba
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {payerMode === 'single' ? (
+                  <select
+                    value={paidBy}
+                    onChange={(e) => setPaidBy(e.target.value)}
+                    className="w-full min-h-[46px] px-4 py-3 rounded-2xl border border-[#E8ECE9] bg-[#F5F7F6]/60 text-base sm:text-sm font-medium text-[#171C19] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#35483F]/20 focus:border-[#35483F]"
+                  >
+                    {selectedGroupDetails?.members.map((m) => (
+                      <option key={m.user_id} value={m.user_id}>
+                        {m.user_id === user?.id
+                          ? `${m.profile.first_name} ${m.profile.last_name} (${t('common.you')})`
+                          : `${m.profile.first_name} ${m.profile.last_name}`}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className="text-xs text-[#606A64] py-2.5 px-3 rounded-2xl bg-[#E8F1EB]/60 border border-[#35483F]/15">
+                    Unesi ispod koliko je svako <strong>dao novca</strong> za ovaj račun.
+                  </p>
+                )}
               </div>
             </div>
+
+            {/* Multi-Payer Inputs Card (Splitwise "Multiple people paid") */}
+            {payerMode === 'multiple' && selectedGroupDetails && (
+              <div className="p-4 rounded-2xl bg-[#F5F7F6] border border-[#E8ECE9] space-y-2.5">
+                <p className="text-xs font-bold text-[#35483F]">
+                  Ko je koliko platio (dao novca)?
+                </p>
+                <div className="space-y-2">
+                  {selectedGroupDetails.members.map((m) => {
+                    const fullName = `${m.profile.first_name} ${m.profile.last_name}`.trim();
+                    return (
+                      <div
+                        key={m.user_id}
+                        className="flex items-center justify-between gap-2.5 bg-white px-3 py-2 rounded-xl border border-[#E8ECE9]"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <MemberAvatar profile={m.profile} size="xs" />
+                          <span className="text-xs sm:text-sm font-medium text-[#171C19] truncate">
+                            {fullName}
+                            {m.user_id === user?.id && (
+                              <span className="text-xs text-[#818A84] ml-1">({t('common.you')})</span>
+                            )}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={payerInputs[m.user_id] ?? ''}
+                            onChange={(e) =>
+                              setPayerInputs((prev) => ({
+                                ...prev,
+                                [m.user_id]: e.target.value,
+                              }))
+                            }
+                            placeholder="0"
+                            className="w-28 px-3 py-1.5 rounded-xl border border-[#E8ECE9] text-right text-sm font-semibold tabular-nums focus:outline-none focus:border-[#35483F]"
+                          />
+                          <span className="text-xs text-[#818A84] w-8">{currency}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {parsedAmountMinor && parsedAmountMinor > 0 && (
+                  <div
+                    className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between ${
+                      multiPayerSummary.valid
+                        ? 'bg-[#E6F4EE] text-[#16835B]'
+                        : 'bg-[#FDF4E6] text-[#B87314]'
+                    }`}
+                  >
+                    <span>
+                      {multiPayerSummary.valid
+                        ? t('expenses.form.exactMatch')
+                        : multiPayerSummary.diffMinor > 0
+                        ? 'Preostalo za unos uplata'
+                        : 'Prekoračen ukupan iznos za'}
+                    </span>
+                    {!multiPayerSummary.valid && (
+                      <span className="tabular-nums">
+                        {formatCurrency(Math.abs(multiPayerSummary.diffMinor), currency, lang)}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Split Method Tabs + Friendly 1-Line Explanation */}
             <div>
@@ -443,7 +645,7 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
                 {splitMethod === 'equal'
                   ? t('guide.hints.splitEqual')
                   : splitMethod === 'custom'
-                  ? t('guide.hints.splitCustom')
+                  ? 'Unesi koliko je svako POTROŠIO (čiji je koliki deo računa). Ako je više osoba dalo novac za račun, izaberi gore „Više osoba“ kod Ko je platio.'
                   : t('guide.hints.splitPercentage')}
               </p>
             </div>
@@ -731,27 +933,31 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
                   {t('expenses.form.livePreviewTitle')}
                 </p>
                 {(() => {
-                  const payerMember = selectedGroupDetails.members.find(
-                    (m) => m.user_id === paidBy
-                  );
-                  const payerLabel =
-                    paidBy === user?.id
-                      ? t('common.you')
-                      : payerMember?.profile.first_name ?? t('common.member');
-                  const owedEntries = splitPreview.shares
-                    .filter((s) => s.userId !== paidBy && s.shareAmountMinor > 0)
-                    .map((s) => {
-                      const mem = selectedGroupDetails.members.find(
-                        (m) => m.user_id === s.userId
-                      );
-                      const name =
-                        s.userId === user?.id
-                          ? t('common.you')
-                          : mem?.profile.first_name ?? t('common.member');
-                      return { userId: s.userId, name, amountMinor: s.shareAmountMinor };
-                    });
+                  const effectivePayers: PayerContribution[] =
+                    payerMode === 'multiple'
+                      ? multiPayerSummary.contributions
+                      : paidBy && parsedAmountMinor
+                      ? [{ userId: paidBy, paidMinor: parsedAmountMinor }]
+                      : [];
 
-                  if (owedEntries.length === 0) {
+                  if (payerMode === 'multiple' && !multiPayerSummary.valid) {
+                    return (
+                      <p className="text-xs text-[#B87314] font-medium">
+                        Unesi tačne uplate gore tako da zbir bude{' '}
+                        {formatCurrency(parsedAmountMinor ?? 0, currency, lang, {
+                          compactZeroDecimals: true,
+                        })}
+                        .
+                      </p>
+                    );
+                  }
+
+                  const transfers = computeMultiPayerTransfers(
+                    effectivePayers,
+                    splitPreview.shares
+                  );
+
+                  if (transfers.length === 0) {
                     return (
                       <p className="text-xs text-[#35483F] font-medium">
                         {t('common.settledUp')}
@@ -759,31 +965,41 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
                     );
                   }
 
+                  const getName = (uid: string) => {
+                    if (uid === user?.id) return t('common.you');
+                    const mem = selectedGroupDetails.members.find((m) => m.user_id === uid);
+                    return mem?.profile.first_name ?? t('common.member');
+                  };
+
                   return (
                     <div className="space-y-1">
-                      {owedEntries.map((entry) => (
-                        <p
-                          key={entry.userId}
-                          className="text-xs font-semibold text-[#171C19] flex items-center justify-between gap-2"
-                        >
-                          <span>
-                            {entry.userId === user?.id
-                              ? t('expenses.form.liveYouOwe', { payer: payerLabel })
-                              : paidBy === user?.id
-                              ? t('expenses.form.liveOwesYou', { name: entry.name })
-                              : `${entry.name} → ${payerLabel}`}
-                          </span>
-                          <span
-                            className={`tabular-nums font-bold ${
-                              entry.userId === user?.id ? 'text-[#C94A4A]' : 'text-[#16835B]'
-                            }`}
+                      {transfers.map((tr) => {
+                        const fromName = getName(tr.fromUserId);
+                        const toName = getName(tr.toUserId);
+                        return (
+                          <p
+                            key={`${tr.fromUserId}-${tr.toUserId}`}
+                            className="text-xs font-semibold text-[#171C19] flex items-center justify-between gap-2"
                           >
-                            {formatCurrency(entry.amountMinor, currency, lang, {
-                              compactZeroDecimals: true,
-                            })}
-                          </span>
-                        </p>
-                      ))}
+                            <span>
+                              {tr.fromUserId === user?.id
+                                ? t('expenses.form.liveYouOwe', { payer: toName })
+                                : tr.toUserId === user?.id
+                                ? t('expenses.form.liveOwesYou', { name: fromName })
+                                : `${fromName} → ${toName}`}
+                            </span>
+                            <span
+                              className={`tabular-nums font-bold ${
+                                tr.fromUserId === user?.id ? 'text-[#C94A4A]' : 'text-[#16835B]'
+                              }`}
+                            >
+                              {formatCurrency(tr.amountMinor, currency, lang, {
+                                compactZeroDecimals: true,
+                              })}
+                            </span>
+                          </p>
+                        );
+                      })}
                     </div>
                   );
                 })()}
