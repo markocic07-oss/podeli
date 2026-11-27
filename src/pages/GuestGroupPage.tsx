@@ -970,12 +970,12 @@ export const GuestGroupPage: React.FC = () => {
       {/* Quick Mark-as-Paid Modal for Guest */}
       {payModal && (
         <div
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-[#171C19]/45 backdrop-blur-[2px]"
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-[#171C19]/45 backdrop-blur-[2px]"
           role="dialog"
           aria-modal="true"
         >
-          <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl border border-[#E8ECE9] shadow-(--shadow-modal) overflow-hidden animate-scale-in">
-            <div className="px-5 py-4 border-b border-[#E8ECE9] flex items-center justify-between">
+          <div className="bg-white w-full sm:max-w-md rounded-3xl border border-[#E8ECE9] shadow-(--shadow-modal) max-h-[88dvh] flex flex-col overflow-hidden animate-scale-in">
+            <div className="px-5 py-3.5 border-b border-[#E8ECE9] flex items-center justify-between shrink-0">
               <h2 className="text-base font-bold text-[#171C19]">{t('settlements.markAsPaid')}</h2>
               <button
                 type="button"
@@ -985,7 +985,7 @@ export const GuestGroupPage: React.FC = () => {
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <form onSubmit={handleSubmitGuestPayment} className="p-5 space-y-4">
+            <form onSubmit={handleSubmitGuestPayment} className="p-4 sm:p-5 overflow-y-auto overscroll-contain flex-1 space-y-4">
               <p className="text-sm text-[#606A64]">
                 {t('settlements.form.receiver')}:{' '}
                 <strong className="text-[#171C19]">{payModal.receiverName}</strong>

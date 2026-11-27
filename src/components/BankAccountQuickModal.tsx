@@ -79,12 +79,12 @@ export const BankAccountQuickModal: React.FC<BankAccountQuickModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-[#171C19]/50 backdrop-blur-[2px] animate-fade-in"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-[#171C19]/50 backdrop-blur-[2px] animate-fade-in"
       role="dialog"
       aria-modal="true"
     >
-      <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl border border-[#E8ECE9] shadow-(--shadow-modal) overflow-hidden animate-scale-in">
-        <div className="px-5 py-4 border-b border-[#E8ECE9] flex items-center justify-between">
+      <div className="bg-white w-full sm:max-w-md rounded-3xl border border-[#E8ECE9] shadow-(--shadow-modal) max-h-[88dvh] flex flex-col overflow-hidden animate-scale-in">
+        <div className="px-5 py-3.5 border-b border-[#E8ECE9] flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-[#E8F1EB] text-[#35483F] flex items-center justify-center">
               <Building2 className="w-5 h-5" />
@@ -104,7 +104,7 @@ export const BankAccountQuickModal: React.FC<BankAccountQuickModalProps> = ({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+        <form onSubmit={handleSubmit} className="p-4 sm:p-5 overflow-y-auto overscroll-contain flex-1 space-y-4">
           {error && (
             <div className="px-4 py-3 rounded-2xl bg-[#FCEEEE] text-[#C94A4A] text-xs font-semibold">
               {error}

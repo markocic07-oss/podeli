@@ -156,22 +156,22 @@ export const DebtReminderModal: React.FC<DebtReminderModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-[#171C19]/50 backdrop-blur-[2px] animate-fade-in"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-[#171C19]/50 backdrop-blur-[2px] animate-fade-in"
       role="dialog"
       aria-modal="true"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl border border-[#E8ECE9] shadow-(--shadow-modal) max-h-[92vh] flex flex-col overflow-hidden animate-scale-in">
+      <div className="bg-white w-full sm:max-w-md rounded-3xl border border-[#E8ECE9] shadow-(--shadow-modal) max-h-[88dvh] flex flex-col overflow-hidden animate-scale-in">
         {/* Header */}
-        <div className="px-5 py-4 border-b border-[#E8ECE9] flex items-center justify-between gap-3 shrink-0">
+        <div className="px-4 sm:px-5 py-3.5 border-b border-[#E8ECE9] flex items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-9 h-9 rounded-xl bg-[#E8F1EB] text-[#35483F] flex items-center justify-center shrink-0">
               <Bell className="w-4.5 h-4.5" />
             </div>
             <div className="min-w-0">
-              <h2 className="text-base font-bold text-[#171C19] truncate">
+              <h2 className="text-sm sm:text-base font-bold text-[#171C19] truncate">
                 {t('reminder.modalTitle', { name: data.debtorName })}
               </h2>
               <p className="text-xs text-[#818A84] truncate">
@@ -189,10 +189,10 @@ export const DebtReminderModal: React.FC<DebtReminderModalProps> = ({
           </button>
         </div>
 
-        {/* Body */}
-        <div className="p-5 overflow-y-auto space-y-4">
+        {/* Scrollable Body */}
+        <div className="p-4 sm:p-5 overflow-y-auto overscroll-contain flex-1 space-y-3">
           {/* Tone Selector Pills */}
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-semibold text-[#606A64]">
                 {t('reminder.toneLabel')}
@@ -218,7 +218,7 @@ export const DebtReminderModal: React.FC<DebtReminderModalProps> = ({
                       setTone(item);
                       setVariantIndex(0);
                     }}
-                    className={`min-h-[38px] px-2 py-1.5 rounded-xl text-xs font-semibold transition-all truncate ${
+                    className={`min-h-[36px] px-2 py-1.5 rounded-xl text-xs font-semibold transition-all truncate ${
                       active
                         ? 'bg-[#35483F] text-white shadow-xs'
                         : 'text-[#606A64] hover:text-[#171C19]'
@@ -234,7 +234,7 @@ export const DebtReminderModal: React.FC<DebtReminderModalProps> = ({
           {/* Chat-bubble Editable Message */}
           <div className="rounded-2xl rounded-tl-md bg-[#E8F1EB]/60 border border-[#35483F]/15 p-3">
             <textarea
-              rows={4}
+              rows={3}
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               aria-label={t('reminder.messageLabel')}
@@ -244,7 +244,7 @@ export const DebtReminderModal: React.FC<DebtReminderModalProps> = ({
 
           {/* Smart Bank Account Toggle (only if creditor has saved bank_account) */}
           {hasValidBank && (
-            <label className="flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-2xl bg-[#F5F7F6] border border-[#E8ECE9] cursor-pointer">
+            <label className="flex items-center justify-between gap-3 px-3.5 py-2 rounded-2xl bg-[#F5F7F6] border border-[#E8ECE9] cursor-pointer">
               <div className="min-w-0">
                 <p className="text-xs font-semibold text-[#171C19]">
                   {t('reminder.includeBankToggle')}
@@ -263,63 +263,59 @@ export const DebtReminderModal: React.FC<DebtReminderModalProps> = ({
               />
             </label>
           )}
+        </div>
 
-          {/* 1-Click Share Actions */}
-          <div className="space-y-2.5 pt-1">
-            <div className="grid grid-cols-2 gap-2.5">
-              {/* WhatsApp */}
-              <a
-                href={buildWhatsAppShareUrl(message)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="min-h-[46px] px-4 py-2.5 rounded-2xl bg-[#25D366] hover:bg-[#1FB858] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors shadow-2xs"
-              >
-                <MessageCircle className="w-4 h-4" />
-                <span>WhatsApp</span>
-              </a>
+        {/* Fixed Bottom 1-Click Share Actions (always visible without scrolling) */}
+        <div className="px-4 sm:px-5 py-3.5 border-t border-[#E8ECE9] bg-white space-y-2 shrink-0">
+          <div className="grid grid-cols-2 gap-2">
+            <a
+              href={buildWhatsAppShareUrl(message)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="min-h-[44px] px-3 py-2 rounded-2xl bg-[#25D366] hover:bg-[#1FB858] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors shadow-2xs"
+            >
+              <MessageCircle className="w-4 h-4" />
+              <span>WhatsApp</span>
+            </a>
 
-              {/* Viber */}
-              <a
-                href={buildViberShareUrl(message)}
-                className="min-h-[46px] px-4 py-2.5 rounded-2xl bg-[#7360F2] hover:bg-[#614EE0] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors shadow-2xs"
-              >
-                <Send className="w-4 h-4" />
-                <span>Viber</span>
-              </a>
-            </div>
+            <a
+              href={buildViberShareUrl(message)}
+              className="min-h-[44px] px-3 py-2 rounded-2xl bg-[#7360F2] hover:bg-[#614EE0] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors shadow-2xs"
+            >
+              <Send className="w-4 h-4" />
+              <span>Viber</span>
+            </a>
+          </div>
 
-            <div className={`grid gap-2.5 ${canNativeShare ? 'grid-cols-2' : 'grid-cols-1'}`}>
-              {/* Copy Message */}
+          <div className={`grid gap-2 ${canNativeShare ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            <button
+              type="button"
+              onClick={handleCopy}
+              className="min-h-[42px] px-3 py-2 rounded-2xl bg-[#35483F] hover:bg-[#2B3B33] text-white text-xs sm:text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors"
+            >
+              {copied ? (
+                <>
+                  <Check className="w-4 h-4" />
+                  <span>{t('common.copied')}</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-4 h-4" />
+                  <span>{t('reminder.copyMessage')}</span>
+                </>
+              )}
+            </button>
+
+            {canNativeShare && (
               <button
                 type="button"
-                onClick={handleCopy}
-                className="min-h-[44px] px-4 py-2.5 rounded-2xl bg-[#35483F] hover:bg-[#2B3B33] text-white text-xs sm:text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors"
+                onClick={handleNativeShare}
+                className="min-h-[42px] px-3 py-2 rounded-2xl bg-white hover:bg-[#F5F7F6] border border-[#E8ECE9] text-[#171C19] text-xs sm:text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors"
               >
-                {copied ? (
-                  <>
-                    <Check className="w-4 h-4" />
-                    <span>{t('common.copied')}</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-4 h-4" />
-                    <span>{t('reminder.copyMessage')}</span>
-                  </>
-                )}
+                <Share2 className="w-4 h-4 text-[#35483F]" />
+                <span>{t('reminder.otherApps')}</span>
               </button>
-
-              {/* Native Share Sheet (Instagram DM, SMS, Telegram...) */}
-              {canNativeShare && (
-                <button
-                  type="button"
-                  onClick={handleNativeShare}
-                  className="min-h-[44px] px-4 py-2.5 rounded-2xl bg-white hover:bg-[#F5F7F6] border border-[#E8ECE9] text-[#171C19] text-xs sm:text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors"
-                >
-                  <Share2 className="w-4 h-4 text-[#35483F]" />
-                  <span>{t('reminder.otherApps')}</span>
-                </button>
-              )}
-            </div>
+            )}
           </div>
         </div>
       </div>

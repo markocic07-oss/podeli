@@ -205,13 +205,13 @@ export const RecordSettlementModal: React.FC<RecordSettlementModalProps> = ({
   return (
     <>
       <div
-        className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-[#171C19]/45 backdrop-blur-[2px] animate-fade-in"
+        className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-[#171C19]/45 backdrop-blur-[2px] animate-fade-in"
         role="dialog"
         aria-modal="true"
       >
-      <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl border border-[#E8ECE9] shadow-(--shadow-modal) overflow-hidden animate-scale-in">
-        <div className="px-6 py-4 border-b border-[#E8ECE9] flex items-center justify-between">
-          <h2 className="text-lg font-bold text-[#171C19]">{t('settlements.form.title')}</h2>
+      <div className="bg-white w-full sm:max-w-md rounded-3xl border border-[#E8ECE9] shadow-(--shadow-modal) max-h-[88dvh] flex flex-col overflow-hidden animate-scale-in">
+        <div className="px-5 py-3.5 border-b border-[#E8ECE9] flex items-center justify-between shrink-0">
+          <h2 className="text-base sm:text-lg font-bold text-[#171C19]">{t('settlements.form.title')}</h2>
           <button
             type="button"
             onClick={onClose}
@@ -222,7 +222,7 @@ export const RecordSettlementModal: React.FC<RecordSettlementModalProps> = ({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="p-4 sm:p-5 overflow-y-auto overscroll-contain flex-1 space-y-3.5">
           <div className="flex items-start gap-2.5 p-3.5 rounded-2xl bg-[#E8F1EB]/70 text-xs text-[#35483F] leading-relaxed">
             <Info className="w-4 h-4 shrink-0 mt-0.5" />
             <span>{t('settlements.disclaimer')}</span>

@@ -51,12 +51,12 @@ export const GuestIdentitySheet: React.FC<GuestIdentitySheetProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-[#171C19]/45 backdrop-blur-[2px] animate-fade-in"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-[#171C19]/45 backdrop-blur-[2px] animate-fade-in"
       role="dialog"
       aria-modal="true"
     >
-      <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl border border-[#E8ECE9] shadow-(--shadow-modal) max-h-[88vh] flex flex-col overflow-hidden animate-scale-in">
-        <div className="px-5 py-4 border-b border-[#E8ECE9] flex items-center justify-between">
+      <div className="bg-white w-full sm:max-w-md rounded-3xl border border-[#E8ECE9] shadow-(--shadow-modal) max-h-[88dvh] flex flex-col overflow-hidden animate-scale-in">
+        <div className="px-5 py-3.5 border-b border-[#E8ECE9] flex items-center justify-between shrink-0">
           <div className="min-w-0">
             <h2 className="text-lg font-bold text-[#171C19]">{t('guest.whoAreYouTitle')}</h2>
             <p className="text-xs text-[#818A84] truncate mt-0.5">{groupName}</p>
